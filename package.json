@@ -1,0 +1,32 @@
+{
+  "name": "frontline",
+  "version": "1.0.0",
+  "description": "Frontline - free global conflict tracker",
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "ingest": "tsx scripts/ingest.ts",
+    "summarize": "tsx scripts/summarize.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "firebase": "latest",
+    "maplibre-gl": "latest",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "firebase-admin": "latest",
+    "tsx": "^4",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}
