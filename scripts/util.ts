@@ -3,6 +3,10 @@
 export const CONFLICT_RE =
   /\b(war|attack\w*|strike[sd]?|airstrike\w*|missile\w*|troops?|militar\w+|killed|ceasefire|truce|drone\w*|shell(?:ing|ed)|clash\w*|offensive|bomb\w*|rebels?|militia\w*|invasion|invade\w*|hostages?|army|soldiers?|insurgen\w+|casualt\w+|navy|warship\w*|frontline|blast|raid\w*)\b/i;
 
+/** Headlines about blackouts or damage to electricity infrastructure, anywhere in the world. */
+export const POWER_RE =
+  /\b(blackouts?|power (?:cuts?|outages?|grid|plants?|stations?|lines?|infrastructure|shortages?)|power(?:ed)? (?:down|out)|(?:electric(?:ity)?|energy) (?:grid|infrastructure|supply|outages?|cuts?|shortages?)|substations?|load.?shedding|(?:without|lose|lost|loses) (?:power|electricity)|nuclear (?:plant|power)|thermal power)\b/i;
+
 const clean = (s: string) =>
   s
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')

@@ -1,7 +1,7 @@
 // Runs every ~10 min from GitHub Actions. Each source is independent: one failing doesn't stop the others.
 import { createHash } from 'node:crypto';
-import { db, gemini } from './lib';
-import { CONFLICT_RE, gdeltTs, parseRss } from './util';
+import { Transient, db, gemini } from './lib';
+import { CONFLICT_RE, POWER_RE, gdeltTs, parseRss } from './util';
 
 type Item = { title: string; url: string; summary?: string; ts: number };
 
@@ -10,6 +10,11 @@ const FEEDS = [
   'https://www.aljazeera.com/xml/rss/all.xml',
   'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
   'https://www.theguardian.com/world/rss',
+  'https://rss.dw.com/rdf/rss-en-world',
+  'https://www.france24.com/en/rss',
+  'https://feeds.npr.org/1004/rss.xml',
+  'https://news.un.org/feed/subscribe/en/news/all/rss.xml',
+  'https://feeds.skynews.com/feeds/rss/world.xml',
 ];
 const GDELT =
   'https://api.gdeltproject.org/api/v2/doc/doc?query=' +
@@ -22,15 +27,16 @@ const get = async (u: string) => {
   return r;
 };
 
-const PROMPT = `You triage news headlines for a global armed-conflict tracker. For each numbered headline decide whether it reports a specific armed-conflict event (attack, strike, clash, shelling, military movement, ceasefire news).
-Return a JSON array with one object per headline: {"i":number,"relevant":boolean,"lat":number,"lon":number,"country":string,"conflict":string,"type":"airstrike"|"battle"|"explosion"|"shelling"|"naval"|"ceasefire"|"other","severity":1|2|3,"summary":string}.
-lat/lon = best estimate of where it happened (use the named city, else the capital). country = common English name. conflict = short stable name such as "Russia-Ukraine war", "Gaza war", "Sudan civil war". summary = neutral, max 25 words. severity: 3 mass casualties or major escalation, 2 notable, 1 minor. If not relevant, set relevant false and use 0 / "" for the rest.
+const PROMPT = `You triage news headlines for a global conflict and energy tracker. For each numbered headline decide whether it reports (a) a specific armed-conflict event (attack, strike, clash, shelling, military movement, ceasefire news) or (b) a blackout, major power outage, or damage to power plants, substations or the electricity grid anywhere in the world (war, storm, sabotage or technical failure).
+Return a JSON array with one object per headline: {"i":number,"relevant":boolean,"lat":number,"lon":number,"country":string,"conflict":string,"type":"airstrike"|"battle"|"explosion"|"shelling"|"naval"|"ceasefire"|"civilians"|"protest"|"other","severity":1|2|3,"power":boolean,"summary":string}.
+lat/lon = best estimate of where it happened (use the named city, else the capital). country = common English name. conflict = short stable name such as "Russia-Ukraine war", "Gaza war", "Sudan civil war"; use "" for a power outage that has nothing to do with an armed conflict. power = true when the report is about electricity supply or infrastructure. summary = neutral, max 25 words. severity: 3 mass casualties, nationwide blackout or major escalation, 2 notable, 1 minor. If not relevant, set relevant false and use 0 / "" for the rest.
 Headlines:
 `;
 
+// A report needs a place and a country, plus either a conflict name or the power flag.
 const valid = (o: any) =>
   Number.isFinite(o.lat) && Number.isFinite(o.lon) && Math.abs(o.lat) <= 90 && Math.abs(o.lon) <= 180 &&
-  !(o.lat === 0 && o.lon === 0) && !!o.country && !!o.conflict;
+  !(o.lat === 0 && o.lon === 0) && !!o.country && (!!o.conflict || o.power === true);
 
 async function news() {
   const results = await Promise.allSettled([
@@ -51,7 +57,7 @@ async function news() {
   const seen = new Set<string>((await seenRef.get()).data()?.ids ?? []);
   const fresh = new Map<string, Item>();
   for (const it of items) {
-    if (!CONFLICT_RE.test(it.title)) continue;
+    if (!CONFLICT_RE.test(it.title) && !POWER_RE.test(it.title)) continue;
     const id = createHash('sha1').update(it.url).digest('hex').slice(0, 20);
     if (!seen.has(id)) fresh.set(id, it);
   }
@@ -72,7 +78,8 @@ async function news() {
           lat: o.lat,
           lon: o.lon,
           country: String(o.country),
-          conflict: String(o.conflict),
+          conflict: String(o.conflict ?? ''),
+          power: o.power === true,
           type: String(o.type ?? 'other'),
           severity: [1, 2, 3].includes(o.severity) ? o.severity : 1,
           source: new URL(it.url).hostname.replace(/^www\./, ''),
@@ -107,34 +114,50 @@ async function acled() {
 
   const day = (d: number) => new Date(now.getTime() - d * 864e5).toISOString().slice(0, 10);
   const r = await fetch(
-    `https://acleddata.com/api/acled/read?_format=json&event_date=${day(3)}|${day(0)}&event_date_where=BETWEEN&limit=500`,
+    `https://acleddata.com/api/acled/read?_format=json&event_date=${day(3)}|${day(0)}&event_date_where=BETWEEN&limit=1500`,
     { headers: { authorization: `Bearer ${tok.access_token}` } },
   );
   if (!r.ok) throw new Error(`ACLED read -> ${r.status}`);
   const rows: any[] = ((await r.json()) as any).data ?? [];
-  const refs = rows.map((x) => db.collection('events').doc(`acled_${x.event_id_cnty}`));
-  const snaps = refs.length ? await db.getAll(...refs) : [];
-  const w = db.batch();
-  let n = 0;
-  rows.forEach((x, i) => {
-    const lat = Number(x.latitude), lon = Number(x.longitude), f = Number(x.fatalities) || 0;
-    if (snaps[i].exists || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    n++;
-    w.set(refs[i], {
-      title: `${x.sub_event_type || x.event_type} - ${x.location}, ${x.country}`,
-      summary: String(x.notes ?? '').slice(0, 300),
-      lat, lon,
-      country: x.country,
-      conflict: x.country, // shortcut: ACLED has no conflict name, so it groups by country and may sit beside a Gemini-named conflict
-      type: String(x.event_type ?? 'other').toLowerCase(),
-      severity: f >= 10 ? 3 : f > 0 ? 2 : 1,
-      source: 'ACLED',
-      url: 'https://acleddata.com/',
-      ts: Date.parse(x.event_date) || Date.now(),
-    });
-  });
-  if (n) await w.commit();
-  console.log(`acled: ${n} new events`);
+
+  // One small doc remembers which ACLED ids we already stored, so a 3-day window costs 1 read instead of 1500.
+  const seenRef = db.doc('meta/acled');
+  const seen = new Set<string>((await seenRef.get()).data()?.ids ?? []);
+  const fresh = rows.filter((x) => !seen.has(String(x.event_id_cnty)) && Number.isFinite(Number(x.latitude)) && Number.isFinite(Number(x.longitude)));
+  for (let i = 0; i < fresh.length; i += 450) {
+    const w = db.batch(); // a Firestore batch holds at most 500 writes
+    for (const x of fresh.slice(i, i + 450)) {
+      const f = Number(x.fatalities) || 0;
+      w.set(db.collection('events').doc(`acled_${x.event_id_cnty}`), {
+        title: `${x.sub_event_type || x.event_type} - ${x.location}, ${x.country}`,
+        summary: String(x.notes ?? '').slice(0, 300),
+        lat: Number(x.latitude), lon: Number(x.longitude),
+        country: x.country,
+        conflict: x.country, // shortcut: ACLED has no conflict name, so the app maps country -> listed conflict
+        power: false,
+        type: acledType(x),
+        severity: f >= 10 ? 3 : f > 0 ? 2 : 1,
+        source: 'ACLED',
+        url: 'https://acleddata.com/',
+        ts: Date.parse(x.event_date) || Date.now(),
+      });
+    }
+    await w.commit();
+  }
+  if (fresh.length) await seenRef.set({ ids: [...seen, ...fresh.map((x) => String(x.event_id_cnty))].slice(-6000) });
+  console.log(`acled: ${fresh.length} new events`);
+}
+
+/** Map ACLED's event types onto the same small set the map has icons for. */
+function acledType(x: any): string {
+  const t = `${x.event_type} ${x.sub_event_type}`.toLowerCase();
+  if (/air|drone/.test(t)) return 'airstrike';
+  if (/shelling|artillery|missile/.test(t)) return 'shelling';
+  if (/explosion|remote violence|grenade|ied/.test(t)) return 'explosion';
+  if (/battle|armed clash/.test(t)) return 'battle';
+  if (/violence against civilians|attack/.test(t)) return 'civilians';
+  if (/protest|riot/.test(t)) return 'protest';
+  return 'other';
 }
 
 const BOXES = [
@@ -165,6 +188,9 @@ async function vessels() {
         if (!md?.MMSI) return;
         const v = ships.get(md.MMSI) ?? { mmsi: md.MMSI };
         Object.assign(v, { name: String(md.ShipName ?? '').trim(), lat: md.latitude, lon: md.longitude });
+        // TrueHeading 511 means "not available"; course over ground is the fallback so ship icons can point the right way.
+        const pr = j.Message?.PositionReport;
+        if (pr) v.hdg = pr.TrueHeading >= 0 && pr.TrueHeading < 360 ? pr.TrueHeading : pr.Cog >= 0 && pr.Cog < 360 ? pr.Cog : undefined;
         // shortcut: type 35 (military) is only seen if a static message lands inside this 45s window; name prefixes cover the rest. Cache MMSI->type in Firestore if naval coverage looks thin.
         if (j.MessageType === 'ShipStaticData') v.type = j.Message?.ShipStaticData?.Type;
         ships.set(md.MMSI, v);
@@ -173,7 +199,7 @@ async function vessels() {
   });
   const items = [...ships.values()]
     .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lon))
-    .map((v) => ({ mmsi: v.mmsi, name: v.name, lat: v.lat, lon: v.lon, navy: v.type === 35 || NAVY_RE.test(v.name) }))
+    .map((v) => ({ mmsi: v.mmsi, name: v.name, lat: v.lat, lon: v.lon, navy: v.type === 35 || NAVY_RE.test(v.name), hdg: Math.round(v.hdg ?? 0) }))
     .sort((a, b) => Number(b.navy) - Number(a.navy))
     .slice(0, 400);
   if (items.length) await db.doc('vessels/latest').set({ ts: Date.now(), items });
@@ -202,7 +228,7 @@ async function planes() {
   }
   const items = ac.map((a: any) => ({
     hex: a.hex, flight: a.flight?.trim() ?? '', t: a.t ?? '', desc: a.desc || names[a.t] || '',
-    lat: a.lat, lon: a.lon, alt: typeof a.alt_baro === 'number' ? a.alt_baro : 0,
+    lat: a.lat, lon: a.lon, alt: typeof a.alt_baro === 'number' ? a.alt_baro : 0, trk: Math.round(a.track ?? 0),
   }));
   if (items.length) await db.doc('planes/latest').set({ ts: Date.now(), items });
   console.log(`planes: ${items.length}`);
@@ -230,5 +256,10 @@ async function markets() {
 }
 
 for (const [name, fn] of Object.entries({ news, acled, vessels, planes, markets })) {
-  try { await fn(); } catch (e) { console.error(`${name} failed:`, e); process.exitCode = 1; }
+  try {
+    await fn();
+  } catch (e) {
+    if (e instanceof Transient) console.warn(`${name} skipped: ${e.message}`); // unfinished headlines stay unseen and are retried next run
+    else { console.error(`${name} failed:`, e); process.exitCode = 1; }
+  }
 }
