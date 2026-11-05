@@ -1,4 +1,7 @@
 import * as maplibregl from 'maplibre-gl';
+// MapLibre 6 runs its drawing code in a separate worker file. `?worker&url` makes Vite bundle it into a standalone
+// file and give us its URL; without this the map stays blank with "Worker failed to load".
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { useEffect, useRef, useState } from 'react';
 import Translate from '../components/Translate';
 import { useData } from '../data';
@@ -7,6 +10,8 @@ import { ago } from '../lib/time';
 import { wikiLookup, type Wiki } from '../lib/wiki';
 import { activityZones, adminZones } from '../lib/zones';
 import type { Ev, Plane, Vessel } from '../types';
+
+maplibregl.setWorkerUrl(workerUrl);
 
 const STYLES = {
   dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
