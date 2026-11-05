@@ -1,9 +1,9 @@
 // Runs every ~10 min from GitHub Actions. Each source is independent: one failing doesn't stop the others.
 import { createHash } from 'node:crypto';
 import { Transient, db, gemini } from './lib';
-import { CONFLICT_RE, POWER_RE, gdeltTs, parseRss } from './util';
+import { CONFLICT_RE, POWER_RE, gdeltTs, parseBsky, parseRss } from './util';
 
-type Item = { title: string; url: string; summary?: string; ts: number };
+type Item = { title: string; url: string; summary?: string; ts: number; source?: string };
 
 const FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -16,6 +16,9 @@ const FEEDS = [
   'https://news.un.org/feed/subscribe/en/news/all/rss.xml',
   'https://feeds.skynews.com/feeds/rss/world.xml',
 ];
+// Trusted news accounts, read from Bluesky because reading X (Twitter) now costs money per post.
+// A wrong or renamed handle just logs a warning; add or remove handles here.
+const BSKY = ['apnews.com', 'reuters.com', 'aljazeera.com', 'nytimes.com', 'theguardian.com', 'washingtonpost.com', 'bellingcat.com', 'npr.org', 'dw.com', 'france24.com'];
 const GDELT =
   'https://api.gdeltproject.org/api/v2/doc/doc?query=' +
   encodeURIComponent('(war OR airstrike OR missile OR ceasefire OR shelling) sourcelang:english') +
@@ -45,6 +48,9 @@ async function news() {
       const j: any = await (await get(GDELT)).json();
       return (j.articles ?? []).map((a: any) => ({ title: a.title, url: a.url, ts: gdeltTs(a.seendate) }));
     })(),
+    ...BSKY.map(async (h): Promise<Item[]> =>
+      parseBsky(await (await get(`https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${h}&limit=20&filter=posts_no_replies`)).json()),
+    ),
   ]);
   const items = results.flatMap((r) => {
     if (r.status === 'fulfilled') return r.value;
@@ -61,7 +67,7 @@ async function news() {
     const id = createHash('sha1').update(it.url).digest('hex').slice(0, 20);
     if (!seen.has(id)) fresh.set(id, it);
   }
-  const todo = [...fresh].slice(0, 90);
+  const todo = [...fresh].sort((a, b) => b[1].ts - a[1].ts).slice(0, 90); // newest first, so a big backlog never starves fresh posts
   const done: string[] = [];
   try {
     for (let i = 0; i < todo.length; i += 30) {
@@ -82,7 +88,7 @@ async function news() {
           power: o.power === true,
           type: String(o.type ?? 'other'),
           severity: [1, 2, 3].includes(o.severity) ? o.severity : 1,
-          source: new URL(it.url).hostname.replace(/^www\./, ''),
+          source: it.source ?? new URL(it.url).hostname.replace(/^www\./, ''),
           url: it.url,
           ts: it.ts,
         });

@@ -47,3 +47,19 @@ export function keywords(titles: string[], n = 15) {
 
 export const gdeltTs = (s?: string) =>
   Date.parse((s ?? '').replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z/, '$1-$2-$3T$4:$5:$6Z')) || Date.now();
+
+/** Posts from a Bluesky getAuthorFeed response, as news items. Skips reposts and posts with no real text (image-only). */
+export function parseBsky(j: any) {
+  return (j?.feed ?? []).flatMap((f: any) => {
+    const p = f?.post;
+    const text = String(p?.record?.text ?? '').replace(/\s+/g, ' ').trim();
+    const rkey = String(p?.uri ?? '').split('/').pop();
+    if (f.reason || text.length < 20 || !p?.author?.handle || !rkey) return [];
+    return [{
+      title: text.slice(0, 280),
+      url: `https://bsky.app/profile/${p.author.handle}/post/${rkey}`,
+      ts: Date.parse(p.record.createdAt) || Date.now(),
+      source: `@${p.author.handle} on Bluesky`,
+    }];
+  });
+}
