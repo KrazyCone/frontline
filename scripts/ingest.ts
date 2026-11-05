@@ -180,6 +180,34 @@ async function vessels() {
   console.log(`vessels: ${items.length} (${items.filter((v) => v.navy).length} naval)`);
 }
 
+async function planes() {
+  // Fetched here, not in the browser: adsb.lol sends no CORS header, so web pages can't read it.
+  const j: any = await (await get('https://api.adsb.lol/v2/mil')).json();
+  const ac = (j.ac ?? []).filter((a: any) => typeof a.lat === 'number' && typeof a.lon === 'number').slice(0, 800);
+
+  // The feed gives ICAO type codes ("C17"); Gemini names each new code once and Firestore remembers it.
+  const typesRef = db.doc('meta/types');
+  const names: Record<string, string> = (await typesRef.get()).data() ?? {};
+  const fresh = [...new Set<string>(ac.map((a: any) => a.t).filter((t: any) => t && !(t in names)))].slice(0, 60);
+  if (fresh.length) {
+    try {
+      const out = await gemini(
+        `Map each ICAO aircraft type designator to the aircraft's common full name, e.g. "C17" -> "Boeing C-17 Globemaster III". Return a JSON object {code: name}. Use "" if you are not sure.\nCodes: ${fresh.join(', ')}`,
+      );
+      for (const c of fresh) names[c] = typeof out?.[c] === 'string' ? out[c] : '';
+      await typesRef.set(names);
+    } catch (e) {
+      console.warn('type names failed:', (e as Error).message);
+    }
+  }
+  const items = ac.map((a: any) => ({
+    hex: a.hex, flight: a.flight?.trim() ?? '', t: a.t ?? '', desc: a.desc || names[a.t] || '',
+    lat: a.lat, lon: a.lon, alt: typeof a.alt_baro === 'number' ? a.alt_baro : 0,
+  }));
+  if (items.length) await db.doc('planes/latest').set({ ts: Date.now(), items });
+  console.log(`planes: ${items.length}`);
+}
+
 const SYMBOLS: [string, string, string][] = [
   ['LMT', 'Lockheed Martin', 'Defense'], ['RTX', 'RTX', 'Defense'], ['NOC', 'Northrop Grumman', 'Defense'],
   ['GD', 'General Dynamics', 'Defense'], ['BA', 'Boeing', 'Defense'],
@@ -201,6 +229,6 @@ async function markets() {
   console.log(`markets: ${items.length}/${SYMBOLS.length} quotes`);
 }
 
-for (const [name, fn] of Object.entries({ news, acled, vessels, markets })) {
+for (const [name, fn] of Object.entries({ news, acled, vessels, planes, markets })) {
   try { await fn(); } catch (e) { console.error(`${name} failed:`, e); process.exitCode = 1; }
 }

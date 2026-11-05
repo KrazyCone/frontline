@@ -6,7 +6,7 @@ Free, real-time global conflict tracker: a live world map (events, heatmap, acti
 GitHub Actions (every 10 min / hourly)          Browser (React + MapLibre)
   news RSS + GDELT -> Gemini (geocode/classify)    live Firestore listeners
   ACLED events, AISStream ships, Yahoo markets  -> Firestore <- Google sign-in
-  hourly Gemini summary + trending words           military aircraft: adsb.lol, direct
+  hourly Gemini summary + trending words           military aircraft: adsb.lol via the job
                                                    Wikipedia: plane / ship cards
 ```
 
@@ -57,7 +57,7 @@ Add your site's domain (`<project>.web.app` is already allowed) under Authentica
 
 ## 4. Known limits (read these)
 
-- **Real-time is ~10 minutes** for news/vessels (GitHub cron minimum + queue delay). Aircraft refresh every 15 s in the browser. GitHub pauses scheduled workflows after 60 days with no repo activity; push any commit to wake them.
+- **Real-time is ~10 minutes** for news/vessels (GitHub cron minimum + queue delay). Aircraft positions refresh on the same schedule, because adsb.lol blocks requests from web pages, so the job fetches them. GitHub pauses scheduled workflows after 60 days with no repo activity; push any commit to wake them.
 - **Free-quota guards**: Firestore reads are capped by a 3-day / 300-event listener and local caching; events older than 14 days are deleted hourly. Fine for a handful of users, not for thousands.
 - **Warships often turn AIS off**, so naval coverage is partial. Aircraft coverage depends on volunteer ADS-B receivers and shows only aircraft flagged military.
 - **ACLED data is delayed** (updated weekly) and is pulled 4x/day.

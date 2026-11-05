@@ -62,12 +62,11 @@ function setup(m: maplibregl.Map) {
 }
 
 export default function MapTab({ active }: { active: boolean }) {
-  const { events, vessels, zones } = useData();
+  const { events, vessels, zones, planes } = useData();
   const { theme } = usePrefs();
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | undefined>(undefined);
   const firstTheme = useRef(true);
-  const [planes, setPlanes] = useState<Plane[]>([]);
   const [vis, setVis] = useState<Record<string, boolean>>(() => Object.fromEntries(Object.keys(GROUPS).map((k) => [k, true])));
   const [sel, setSel] = useState<Sel | null>(null);
   // Map callbacks outlive renders, so they read the latest values from here.
@@ -124,26 +123,6 @@ export default function MapTab({ active }: { active: boolean }) {
     if (m?.getLayer('country-hl')) m.setFilter('country-hl', ['==', ['get', 'NAME'], sel?.kind === 'country' ? sel.title : '']);
   }, [sel]);
   useEffect(() => { if (active) setTimeout(() => map.current?.resize(), 0); }, [active]);
-
-  // Military aircraft: polled straight from the browser (free, no key) only while this tab is open.
-  useEffect(() => {
-    if (!active) return;
-    let stop = false;
-    const tick = async () => {
-      try {
-        const j = await (await fetch('https://api.adsb.lol/v2/mil')).json();
-        if (stop) return;
-        setPlanes(
-          (j.ac ?? [])
-            .filter((a: any) => typeof a.lat === 'number' && typeof a.lon === 'number')
-            .map((a: any) => ({ hex: a.hex, flight: a.flight?.trim(), t: a.t, desc: a.desc, lat: a.lat, lon: a.lon, alt: typeof a.alt_baro === 'number' ? a.alt_baro : undefined })),
-        );
-      } catch { /* feed unreachable: keep the last known planes */ }
-    };
-    tick();
-    const i = setInterval(tick, 15_000);
-    return () => { stop = true; clearInterval(i); };
-  }, [active]);
 
   return (
     <div className="mapwrap">
