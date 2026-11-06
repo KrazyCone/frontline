@@ -1,6 +1,5 @@
 import { doc, getDoc } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
-import Translate from '../components/Translate';
 import { db } from '../firebase';
 import { hourId, next5pm, recent5pms } from '../lib/time';
 import type { Summary } from '../types';
@@ -32,12 +31,12 @@ export default function SummaryTab() {
       {s === null && <p className="muted">No summary for this day yet. If 5 PM just passed, check back in a few minutes.</p>}
       {s && (
         <>
-          <h3>Overview <Translate text={s.overall} /></h3>
+          <h3>Overview</h3>
           {s.overall.split('\n\n').map((p, n) => <p key={n}>{p}</p>)}
           <h3>By conflict</h3>
           {s.conflicts.map((c) => (
             <div key={c.name} className="card">
-              <b>{c.name}</b> <Translate text={c.text} />
+              <b>{c.name}</b>
               <p>{c.text}</p>
             </div>
           ))}

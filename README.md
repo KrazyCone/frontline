@@ -14,7 +14,10 @@ Frontline pulls in news from trusted outlets, uses AI to work out *where* each s
 - **Daily briefing.** A neutral summary of the day's developments, ready at **5 PM in your own time zone**, with the last 7 days to browse.
 - **Home feed** of the most active conflicts and the latest headlines.
 - **Markets.** Defense stocks, oil, gas, gold and key currencies, plus the words that keep showing up in the news.
-- **Translate** any headline or summary with one tap, in the language you pick in Settings.
+- **World tension index** along the bottom of the map: a 0-100 reading of how much conflict was reported in the last 24 hours, with a 48-hour trend line. It is a rough, relative measure, not a scientific one.
+- **Live replay.** Press play to fly through the newest events one by one.
+- **Search the globe** for a place, a conflict, an aircraft callsign or a ship name.
+- **English-language reports only.** Other-language headlines are filtered out before they reach the map.
 - **Light and dark themes**, automatic by default.
 
 ## How it works
@@ -61,7 +64,7 @@ Frontline is an informational tool, not a source of record, and **not for safety
 
 ## Privacy
 
-You sign in with Google through Firebase Authentication. Frontline keeps your theme and translation-language choices in your own browser only. It does not show ads or sell data. The map loads tiles from CARTO, borders from jsDelivr and descriptions from Wikipedia, so those services see your IP address like any website you visit.
+You sign in with Google through Firebase Authentication. Frontline keeps your theme choice in your own browser only. It does not show ads or sell data. The map loads tiles from CARTO, borders from jsDelivr and descriptions from Wikipedia, and place search uses OpenStreetMap's Nominatim, so those services see your IP address like any website you visit.
 
 ## Run your own copy
 

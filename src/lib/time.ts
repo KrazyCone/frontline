@@ -3,6 +3,9 @@ export const ago = (ts: number) => {
   return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 };
 
+/** "8m ago", or "just now". */
+export const agoText = (ts: number) => (ago(ts) === 'now' ? 'just now' : `${ago(ts)} ago`);
+
 /** The last n local-5-PM instants that have already passed, newest first. */
 export function recent5pms(n: number, now = new Date()) {
   const d = new Date(now);

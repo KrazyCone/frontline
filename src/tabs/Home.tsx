@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import Translate from '../components/Translate';
 import { useData } from '../data';
 import { ago } from '../lib/time';
 
@@ -43,7 +42,7 @@ export default function Home({ go }: { go: (t: string) => void }) {
       <h3>Top headlines</h3>
       {events.slice(0, 15).map((e) => (
         <article key={e.id} className="row">
-          <a href={e.url} target="_blank" rel="noreferrer"><b>{e.title}</b></a> <Translate text={e.title} />
+          <a href={e.url} target="_blank" rel="noreferrer"><b>{e.title}</b></a>
           <small className="muted">{e.country} · {e.source} · {ago(e.ts)}</small>
         </article>
       ))}

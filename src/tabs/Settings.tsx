@@ -5,13 +5,8 @@ import { useData } from '../data';
 import { ADMIN_EMAIL, auth, db } from '../firebase';
 import { usePrefs } from '../lib/prefs';
 
-const LANGS: [string, string][] = [
-  ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['ar', 'العربية'], ['ru', 'Русский'],
-  ['uk', 'Українська'], ['he', 'עברית'], ['tr', 'Türkçe'], ['hi', 'हिन्दी'], ['zh-CN', '中文'], ['ja', '日本語'], ['en', 'English'],
-];
-
 export default function Settings({ user }: { user: User }) {
-  const { pref, setPref, lang, setLang } = usePrefs();
+  const { pref, setPref } = usePrefs();
   return (
     <>
       <h2>Settings</h2>
@@ -20,11 +15,6 @@ export default function Settings({ user }: { user: User }) {
           <option value="auto">Automatic (match device)</option>
           <option value="dark">Dark</option>
           <option value="light">Light</option>
-        </select>
-      </label>
-      <label className="field">Translate button language
-        <select value={lang} onChange={(e) => setLang(e.target.value)}>
-          {LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
         </select>
       </label>
       <p className="muted">Signed in as {user.email}</p>

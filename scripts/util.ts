@@ -54,7 +54,8 @@ export function parseBsky(j: any) {
     const p = f?.post;
     const text = String(p?.record?.text ?? '').replace(/\s+/g, ' ').trim();
     const rkey = String(p?.uri ?? '').split('/').pop();
-    if (f.reason || text.length < 20 || !p?.author?.handle || !rkey) return [];
+    const langs = p?.record?.langs; // Bluesky tags each post with its language(s); untagged posts fall through to isEnglish
+    if (f.reason || text.length < 20 || !p?.author?.handle || !rkey || (Array.isArray(langs) && langs.length && !langs.includes('en'))) return [];
     return [{
       title: text.slice(0, 280),
       url: `https://bsky.app/profile/${p.author.handle}/post/${rkey}`,
@@ -76,4 +77,31 @@ export function vesselKind(type: number | undefined, name = ''): string {
   if (type === 31 || type === 32 || type === 52 || type === 33) return 'tug';
   if (type === 36 || type === 37) return 'sail';
   return 'other';
+}
+
+const words = (list: string) => new Set(list.split(' '));
+const EN = words('the and of to for with after from that has are was will its says said at by be over in on as kills killed hits strike strikes attack attacks war ceasefire military army forces troops');
+// Common words of the languages the news feeds actually carry; "in", "an" and "on" are left out because several share them with English.
+const FOREIGN = words(
+  'el la los las del con por una que se en muertos ataque ' + // Spanish
+  'le les des du sur une est dans pour avec plusieurs ' + // French
+  'der die das und mit von nicht auf für ist ' + // German
+  'il di che per della non com para ' + // Italian / Portuguese
+  've bir için ile', // Turkish
+);
+/**
+ * Cheap English check for a headline, so other-language reports never reach the map.
+ * Rejects non-Latin scripts outright, and Latin-script text with more foreign than English common words.
+ * shortcut: a heuristic, not a language detector; a rare foreign headline can slip through, and Gemini is also told to skip them.
+ */
+export function isEnglish(s: string): boolean {
+  const letters = s.match(/\p{L}/gu) ?? [];
+  if (!letters.length) return false;
+  if (letters.filter((c) => /\p{Script=Latin}/u.test(c)).length / letters.length < 0.85) return false;
+  let en = 0, other = 0;
+  for (const w of s.toLowerCase().split(/[^\p{L}]+/u)) {
+    if (EN.has(w)) en++;
+    else if (FOREIGN.has(w)) other++;
+  }
+  return other <= en;
 }

@@ -3,10 +3,9 @@ import { CONFLICTS, conflictFor, conflictStats, levelOf } from '../lib/conflicts
 import { sameCountry } from '../lib/countries';
 import { EVENT_LABEL, VESSEL_LABEL, eventKind, vesselKindOf } from '../lib/kinds';
 import { FUEL, accessColor, type Power } from '../lib/power';
-import { ago } from '../lib/time';
+import { ago, agoText } from '../lib/time';
 import { wikiLookup, type Wiki } from '../lib/wiki';
 import type { Ev, Plane, Plant, Vessel } from '../types';
-import Translate from './Translate';
 
 export type Sel =
   | { kind: 'country'; title: string; iso: string; names: string[] }
@@ -160,8 +159,8 @@ export default function Sheet({ sel, events, power, close, pick }: Props) {
     const c = conflictFor(e);
     body = (
       <>
-        <h3>{e.title} <Translate text={`${e.title}. ${e.summary ?? ''}`} /></h3>
-        <p className="muted">{EVENT_LABEL[eventKind(e.type, e.power)]} · {e.country} · {e.source} · {ago(e.ts)} ago</p>
+        <h3>{e.title}</h3>
+        <p className="muted">{EVENT_LABEL[eventKind(e.type, e.power)]} · {e.country} · {e.source} · {agoText(e.ts)}</p>
         {e.summary && <p>{e.summary}</p>}
         {c && <button onClick={() => pick({ kind: 'conflict', id: c.id }, { lon: c.lon, lat: c.lat, zoom: c.zoom })}>More on {c.name}</button>}{' '}
         {e.url && <a href={e.url} target="_blank" rel="noreferrer">Source ↗</a>}
