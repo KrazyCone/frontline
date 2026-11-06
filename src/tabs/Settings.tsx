@@ -60,7 +60,7 @@ function Admin() {
     const f = new FormData(e.currentTarget);
     try {
       JSON.parse(String(f.get('geojson')));
-      await addDoc(collection(db, 'zones'), { name: f.get('name'), color: f.get('color'), geojson: f.get('geojson') });
+      await addDoc(collection(db, 'zones'), { name: f.get('name'), color: f.get('color'), description: f.get('description') ?? '', geojson: f.get('geojson') });
       e.currentTarget.reset();
       setMsg('Zone added.');
     } catch (err) { setMsg(`Zone not saved: ${err}`); }
@@ -83,6 +83,7 @@ function Admin() {
       <form onSubmit={addZone}>
         <h4>Add / override a territory zone</h4>
         <input name="name" placeholder="Zone name" required />
+        <input name="description" placeholder="Description (optional; shown when the zone is tapped)" />
         <input name="color" type="color" defaultValue="#ff3b30" />
         <textarea name="geojson" rows={4} placeholder='GeoJSON Polygon, e.g. {"type":"Polygon","coordinates":[[[30,48],[31,48],[31,49],[30,48]]]}' required />
         <button>Add zone</button>

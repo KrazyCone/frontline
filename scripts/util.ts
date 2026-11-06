@@ -63,3 +63,17 @@ export function parseBsky(j: any) {
     }];
   });
 }
+
+const NAVY_RE = /^(USS|USNS|HMS|HMAS|HMCS|FS|INS|RFS|JS|ROKS|TCG|HDMS|PLAN)\s/;
+/** Vessel group from the AIS ship-type number (35 = military, 70s = cargo, 80s = tanker...) or a warship name prefix. */
+export function vesselKind(type: number | undefined, name = ''): string {
+  if (type === 35 || NAVY_RE.test(name)) return 'navy';
+  if (type === undefined) return 'other';
+  if (type >= 70 && type < 80) return 'cargo';
+  if (type >= 80 && type < 90) return 'tanker';
+  if (type >= 60 && type < 70) return 'passenger';
+  if (type === 30) return 'fishing';
+  if (type === 31 || type === 32 || type === 52 || type === 33) return 'tug';
+  if (type === 36 || type === 37) return 'sail';
+  return 'other';
+}

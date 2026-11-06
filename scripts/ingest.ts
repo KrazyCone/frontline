@@ -1,7 +1,7 @@
 // Runs every ~10 min from GitHub Actions. Each source is independent: one failing doesn't stop the others.
 import { createHash } from 'node:crypto';
 import { Transient, db, gemini } from './lib';
-import { CONFLICT_RE, POWER_RE, gdeltTs, parseBsky, parseRss } from './util';
+import { CONFLICT_RE, POWER_RE, gdeltTs, parseBsky, parseRss, vesselKind } from './util';
 
 type Item = { title: string; url: string; summary?: string; ts: number; source?: string };
 
@@ -18,7 +18,7 @@ const FEEDS = [
 ];
 // Trusted news accounts, read from Bluesky because reading X (Twitter) now costs money per post.
 // A wrong or renamed handle just logs a warning; add or remove handles here.
-const BSKY = ['apnews.com', 'reuters.com', 'aljazeera.com', 'nytimes.com', 'theguardian.com', 'washingtonpost.com', 'bellingcat.com', 'npr.org', 'dw.com', 'france24.com'];
+const BSKY = ['apnews.com', 'reuters.com', 'aljazeera.com', 'nytimes.com', 'theguardian.com', 'washingtonpost.com', 'bellingcat.com', 'npr.org', 'france24.com'];
 const GDELT =
   'https://api.gdeltproject.org/api/v2/doc/doc?query=' +
   encodeURIComponent('(war OR airstrike OR missile OR ceasefire OR shelling) sourcelang:english') +
@@ -173,8 +173,6 @@ const BOXES = [
   [[31, 29], [37, 37]], // Eastern Mediterranean
   [[21, 117], [27, 123]], // Taiwan Strait
 ];
-const NAVY_RE = /^(USS|USNS|HMS|HMAS|HMCS|FS|INS|RFS|JS|ROKS|TCG|HDMS|PLAN)\s/;
-
 async function vessels() {
   const key = process.env.AISSTREAM_KEY;
   if (!key) return;
@@ -197,17 +195,26 @@ async function vessels() {
         // TrueHeading 511 means "not available"; course over ground is the fallback so ship icons can point the right way.
         const pr = j.Message?.PositionReport;
         if (pr) v.hdg = pr.TrueHeading >= 0 && pr.TrueHeading < 360 ? pr.TrueHeading : pr.Cog >= 0 && pr.Cog < 360 ? pr.Cog : undefined;
-        // shortcut: type 35 (military) is only seen if a static message lands inside this 45s window; name prefixes cover the rest. Cache MMSI->type in Firestore if naval coverage looks thin.
+        // The type only arrives in static messages, so it is cached below and name prefixes cover warships meanwhile.
         if (j.MessageType === 'ShipStaticData') v.type = j.Message?.ShipStaticData?.Type;
         ships.set(md.MMSI, v);
       } catch {}
     };
   });
+  // AIS only sends a ship's type now and then, so remember it across runs (MMSI -> type) to name more ships each time.
+  const typesRef = db.doc('meta/ais');
+  const known: Record<string, number> = (await typesRef.get()).data()?.types ?? {};
+  for (const v of ships.values()) if (typeof v.type === 'number') known[v.mmsi] = v.type;
   const items = [...ships.values()]
     .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lon))
-    .map((v) => ({ mmsi: v.mmsi, name: v.name, lat: v.lat, lon: v.lon, navy: v.type === 35 || NAVY_RE.test(v.name), hdg: Math.round(v.hdg ?? 0) }))
+    .map((v) => {
+      const kind = vesselKind(known[v.mmsi], v.name);
+      return { mmsi: v.mmsi, name: v.name, lat: v.lat, lon: v.lon, navy: kind === 'navy', kind, hdg: Math.round(v.hdg ?? 0) };
+    })
     .sort((a, b) => Number(b.navy) - Number(a.navy))
     .slice(0, 400);
+  // shortcut: numeric keys sort by MMSI, so past 4000 ships the cap drops by number, not age; fine for 5 small sea areas.
+  await typesRef.set({ types: Object.fromEntries(Object.entries(known).slice(-4000)) });
   if (items.length) await db.doc('vessels/latest').set({ ts: Date.now(), items });
   console.log(`vessels: ${items.length} (${items.filter((v) => v.navy).length} naval)`);
 }
