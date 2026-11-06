@@ -2,14 +2,17 @@ import * as maplibregl from 'maplibre-gl';
 // MapLibre 6 runs its drawing code in a separate worker file. `?worker&url` makes Vite bundle it into a standalone
 // file and give us its URL; without this the map stays blank with "Worker failed to load".
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Sheet, { type Sel } from '../components/Sheet';
 import { useData } from '../data';
 import { CONFLICTS, colorFor, conflictFor, conflictStats, levelOf, type Level } from '../lib/conflicts';
-import { addIcons } from '../lib/icons';
-import { eventKind, planeKind, vesselKindOf } from '../lib/kinds';
+import { PLANE, addIcons } from '../lib/icons';
+import { eventKind, planeKind, planeRank, vesselKindOf } from '../lib/kinds';
 import { FUEL, accessColor, loadPower, type Power } from '../lib/power';
 import { usePrefs } from '../lib/prefs';
+import { agoText } from '../lib/time';
+import { tensionColor, tensionLevel, tensionSeries } from '../lib/tension';
+import type { Ev } from '../types';
 import { activityZones, adminZones } from '../lib/zones';
 
 maplibregl.setWorkerUrl(workerUrl);
@@ -55,7 +58,7 @@ function setup(m: maplibregl.Map) {
   const before = m.getStyle().layers.find((l) => l.type === 'symbol')?.id;
   const cluster = (radius: number, max: number) => ({ type: 'geojson', data: EMPTY, cluster: true, clusterRadius: radius, clusterMaxZoom: max, clusterProperties: { sev: ['max', ['get', 'severity']] } }) as never;
   m.addSource('countries', { type: 'geojson', data: COUNTRIES });
-  for (const id of ['zones', 'plants', 'pulse', 'evraw']) m.addSource(id, { type: 'geojson', data: EMPTY as never });
+  for (const id of ['zones', 'plants', 'pulse', 'evraw', 'focus']) m.addSource(id, { type: 'geojson', data: EMPTY as never });
   m.addSource('events', cluster(44, 6));
   m.addSource('planes', cluster(52, 7));
   m.addSource('vessels', cluster(52, 7));
@@ -93,6 +96,7 @@ function setup(m: maplibregl.Map) {
     id: 'planes', type: 'symbol', source: 'planes', filter: unclustered as never,
     layout: { 'icon-image': ['get', 'kind'], 'icon-rotate': ['get', 'trk'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-size': size },
   });
+  m.addLayer({ id: 'focus', type: 'circle', source: 'focus', paint: { 'circle-radius': 20, 'circle-color': 'rgba(255,255,255,0)', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff' } });
   m.addLayer({
     id: 'events', type: 'symbol', source: 'events', filter: unclustered as never,
     layout: { 'icon-image': ['concat', 'ev-', ['get', 'kind'], '-', ['to-string', ['get', 'severity']]], 'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-size': size, 'symbol-sort-key': ['get', 'severity'] },
@@ -125,6 +129,10 @@ export default function MapTab({ active }: { active: boolean }) {
   const [win, setWin] = useState(72); // hours of events to show
   const [panel, setPanel] = useState(false);
   const [power, setPower] = useState<Power | null>(null);
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<{ label: string; sub: string; go: () => void }[] | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [cur, setCur] = useState<Ev | null>(null);
   // Map callbacks outlive renders, so they read the latest values from here.
   const live = useRef({ events, vessels, zones, planes, vis, win, power, globe });
   live.current = { events, vessels, zones, planes, vis, win, power, globe };
@@ -134,6 +142,7 @@ export default function MapTab({ active }: { active: boolean }) {
 
   const pick = (s: Sel | null, fly?: { lon: number; lat: number; zoom: number }) => {
     setSel(s);
+    setPlaying(false);
     if (fly) map.current?.flyTo({ center: [fly.lon, fly.lat], zoom: Math.max(map.current.getZoom(), fly.zoom), essential: true });
   };
 
@@ -159,6 +168,18 @@ export default function MapTab({ active }: { active: boolean }) {
           el.textContent = n > 999 ? `${Math.round(n / 100) / 10}k` : String(n);
           el.title = `${n} items. Tap to zoom in.`;
           el.onclick = () => (m.getSource(src) as maplibregl.GeoJSONSource).getClusterExpansionZoom(p.cluster_id).then((z) => m.easeTo({ center: at, zoom: z + 0.4 }));
+          if (src === 'planes') {
+            // Show the most notable aircraft in the bunch (its callsign and heading) instead of just a count.
+            (m.getSource(src) as maplibregl.GeoJSONSource).getClusterLeaves(p.cluster_id, 80, 0).then((leaves) => {
+              const top = leaves.reduce((a, b) => (Number(b.properties?.rank) > Number(a.properties?.rank) ? b : a));
+              const t = (top.properties ?? {}) as Record<string, unknown>;
+              const label = String(t.label ?? '').replace(/[<>&"]/g, '');
+              el.className = 'cl pl main';
+              el.style.width = el.style.height = '';
+              el.innerHTML = `<svg viewBox="0 0 24 24" style="transform:rotate(${Number(t.trk) || 0}deg)"><path d="${PLANE}"/></svg><b>${label}</b><i>+${n - 1}</i>`;
+              el.title = `${label} and ${n - 1} more aircraft here. Tap to zoom in.`;
+            }).catch(() => { /* keep the plain count badge */ });
+          }
           mk = new maplibregl.Marker({ element: el }).setLngLat(at).addTo(m);
           store.set(key, mk);
         }
@@ -180,7 +201,7 @@ export default function MapTab({ active }: { active: boolean }) {
     set('events', fc(evFeatures));
     set('evraw', fc(evFeatures)); // unclustered copy for the heatmap
     set('pulse', fc(evs.filter((e) => e.severity === 3 && now - e.ts < 6 * 36e5).map((e) => pt(e.lon, e.lat, {}))));
-    set('planes', fc(L.planes.map((p) => pt(p.lon, p.lat, { id: p.hex, kind: planeKind(p), trk: p.trk ?? 0 }))));
+    set('planes', fc(L.planes.map((p) => pt(p.lon, p.lat, { id: p.hex, kind: planeKind(p), trk: p.trk ?? 0, rank: planeRank(p), label: p.flight?.trim() || p.t || p.hex }))));
     set('vessels', fc(L.vessels.map((v) => pt(v.lon, v.lat, { id: v.mmsi, kind: vesselKindOf(v), hdg: v.hdg ?? 0 }))));
     const zoneKey = (e: (typeof evs)[number]) => {
       const c = conflictFor(e);
@@ -313,6 +334,56 @@ export default function MapTab({ active }: { active: boolean }) {
     return () => cancelAnimationFrame(raf);
   }, [active]);
 
+  // Play: fly through the newest events one by one, like a live replay.
+  useEffect(() => {
+    if (!playing) { setCur(null); return; }
+    const queue = [...live.current.events].filter((e) => Date.now() - e.ts < 24 * 36e5).sort((a, b) => b.ts - a.ts).slice(0, 40);
+    if (!queue.length) { setPlaying(false); return; }
+    let i = 0;
+    const step = () => {
+      const e = queue[i++ % queue.length];
+      setCur(e);
+      map.current?.flyTo({ center: [e.lon, e.lat], zoom: 5, duration: 2500, essential: true });
+    };
+    step();
+    const t = setInterval(step, 6000);
+    return () => clearInterval(t);
+  }, [playing]);
+  useEffect(() => {
+    (map.current?.getSource('focus') as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: cur ? [pt(cur.lon, cur.lat, {})] : [] } as never);
+  }, [cur]);
+
+  const search = async (ev: FormEvent) => {
+    ev.preventDefault();
+    const s = q.trim().toLowerCase();
+    if (s.length < 2) return;
+    const out: { label: string; sub: string; go: () => void }[] = [];
+    for (const c of CONFLICTS)
+      if (`${c.name} ${c.countries.join(' ')}`.toLowerCase().includes(s)) out.push({ label: c.name, sub: 'Conflict', go: () => pick({ kind: 'conflict', id: c.id }, { lon: c.lon, lat: c.lat, zoom: c.zoom }) });
+    for (const p of planes.filter((x) => (x.flight ?? '').toLowerCase().includes(s) || x.hex === s).slice(0, 3))
+      out.push({ label: p.flight?.trim() || p.hex, sub: `Aircraft ${p.desc ?? p.t ?? ''}`, go: () => pick({ kind: 'plane', p }, { lon: p.lon, lat: p.lat, zoom: 7 }) });
+    for (const v of vessels.filter((x) => x.name.toLowerCase().includes(s)).slice(0, 3))
+      out.push({ label: v.name, sub: 'Vessel', go: () => pick({ kind: 'vessel', v }, { lon: v.lon, lat: v.lat, zoom: 7 }) });
+    setHits([...out]);
+    try {
+      // OpenStreetMap's free place search; only called when the user presses Enter, as its usage policy asks.
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=en&q=${encodeURIComponent(q.trim())}`);
+      const places: { display_name: string; type: string; boundingbox: string[]; lat: string; lon: string }[] = await r.json();
+      for (const x of places) {
+        const [south, north, west, east] = x.boundingbox.map(Number);
+        out.push({
+          label: x.display_name.split(', ').slice(0, 3).join(', '), sub: 'Place',
+          go: () => { setSel(null); map.current?.fitBounds([[west, south], [east, north]], { padding: 60, maxZoom: 9, duration: 1800 }); },
+        });
+      }
+      setHits([...out]);
+    } catch { /* offline or blocked: the local matches above still show */ }
+    if (!out.length) setHits([]);
+  };
+
+  const series = useMemo(() => tensionSeries(events), [events]);
+  const tNow = series[series.length - 1], tYesterday = series[series.length - 9];
+
   const list = useMemo(() => {
     const rows = CONFLICTS.map((c) => ({ id: c.id, name: c.name, region: c.region, st: stats.byId.get(c.id)!, s: { kind: 'conflict', id: c.id } as Sel, lon: c.lon, lat: c.lat, zoom: c.zoom }));
     for (const [name, st] of stats.other) {
@@ -326,10 +397,21 @@ export default function MapTab({ active }: { active: boolean }) {
     <div className="mapwrap">
       <div ref={box} className="mapbox" />
       <div className="mapbar">
+        <form className="search" onSubmit={search}>
+          <input value={q} onChange={(e) => { setQ(e.target.value); if (!e.target.value) setHits(null); }} placeholder="Search places, conflicts, flights, ships" aria-label="Search the globe" />
+          <button type="submit" aria-label="Search">🔍</button>
+          {hits && (
+            <div className="hits">
+              {hits.length === 0 && <small className="muted">No matches.</small>}
+              {hits.map((h, i) => <button key={i} type="button" onClick={() => { h.go(); setHits(null); }}><b>{h.label}</b><small className="muted">{h.sub}</small></button>)}
+            </div>
+          )}
+        </form>
         <button className={panel ? 'on' : ''} onClick={() => setPanel(!panel)}>☰ Conflicts <b>{list.filter((r) => r.st.total).length}</b></button>
         <div className="seg">
           {[[24, '24h'], [72, '3 days']].map(([h, l]) => <button key={h} className={win === h ? 'on' : ''} onClick={() => setWin(h as number)}>{l}</button>)}
         </div>
+        <button className={playing ? 'on' : ''} onClick={() => setPlaying(!playing)} title="Fly through the latest events">{playing ? '⏸ Live' : '▶ Live'}</button>
         <button onClick={() => setGlobe(!globe)} title="Switch between the 3D globe and the flat map">{globe ? '🌐 3D' : '🗺 2D'}</button>
       </div>
       <details className="layers">
@@ -361,6 +443,22 @@ export default function MapTab({ active }: { active: boolean }) {
           })}
         </div>
       )}
+      {cur && (
+        <button className="live" onClick={() => pick({ kind: 'event', e: cur })}>
+          <b>● LIVE</b> <span>{agoText(cur.ts)}</span> <em>{cur.title}</em> <small>{cur.source}</small>
+        </button>
+      )}
+      <div className="tension" title="Based on how many conflict reports came in over the last 24 hours, with serious ones counting more. A rough, relative measure, not a scientific one.">
+        <div>
+          <small>World tension</small>
+          <b style={{ color: tensionColor(tNow) }}>{tNow}</b>
+          <span>{tensionLevel(tNow)}</span>
+          <small style={{ color: tNow > tYesterday ? 'var(--accent)' : 'var(--muted)' }}>{tNow === tYesterday ? 'steady' : `${tNow > tYesterday ? '▲' : '▼'} ${Math.abs(tNow - tYesterday)} vs yesterday`}</small>
+        </div>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none" aria-label="Tension over the last 48 hours">
+          <polyline fill="none" stroke={tensionColor(tNow)} strokeWidth="2" strokeLinejoin="round" points={series.map((v, i) => `${(i * 120) / (series.length - 1)},${34 - (v / 100) * 32}`).join(' ')} />
+        </svg>
+      </div>
       {sel && <Sheet sel={sel} events={events} power={power} close={() => setSel(null)} pick={pick} />}
     </div>
   );

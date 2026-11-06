@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mixByCountry, parseCsv, readPlants } from '../scripts/csv';
-import { POWER_RE, parseBsky, vesselKind } from '../scripts/util';
+import { POWER_RE, isEnglish, parseBsky, vesselKind } from '../scripts/util';
 import { CONFLICTS, conflictFor, conflictStats, levelOf } from '../src/lib/conflicts';
 import { normCountry } from '../src/lib/countries';
-import { eventKind, planeKind, vesselKindOf } from '../src/lib/kinds';
+import { eventKind, planeKind, planeRank, vesselKindOf } from '../src/lib/kinds';
+import { tensionIndex, tensionLevel, tensionSeries } from '../src/lib/tension';
 import { activityZones, adminZones, clusters, hull, smooth } from '../src/lib/zones';
 import type { Ev } from '../src/types';
 
@@ -131,4 +132,47 @@ test('AIS ship types group into vessel kinds', () => {
   assert.deepEqual([70, 75, 80, 84, 60, 30, 31, 36, 35, 99].map((t) => vesselKind(t)), ['cargo', 'cargo', 'tanker', 'tanker', 'passenger', 'fishing', 'tug', 'sail', 'navy', 'other']);
   assert.equal(vesselKind(undefined, 'USS Gerald R. Ford'), 'navy');
   assert.equal(vesselKind(undefined, 'MSC ANNA'), 'other');
+});
+
+test('only English headlines pass', () => {
+  assert.ok(isEnglish('Missile strike hits residential block in Kyiv'));
+  assert.ok(isEnglish('Gaza ceasefire'));
+  assert.ok(!isEnglish('Ataque con misiles deja diez muertos en Kiev'));
+  assert.ok(!isEnglish('Frappes russes sur Kharkiv, plusieurs blessés'));
+  assert.ok(!isEnglish('Russland greift Kiew mit Raketen an'));
+  assert.ok(!isEnglish('Удар по Харькову: есть погибшие'));
+  assert.ok(!isEnglish('غارة جوية على غزة'));
+  assert.ok(!isEnglish('12345 !!!'));
+});
+
+test('bluesky posts tagged with another language are skipped', () => {
+  const post = (langs?: string[]) => ({ post: { uri: 'at://d/app.bsky.feed.post/k1', author: { handle: 'x.com' }, record: { text: 'A long enough post about something', createdAt: '2026-11-05T12:00:00Z', langs } } });
+  assert.equal(parseBsky({ feed: [post(['en']), post(['es']), post(undefined), post(['en', 'es'])] }).length, 3);
+});
+
+test('tension index rises with volume and severity, ignores old and power-only reports', () => {
+  const now = Date.now();
+  const mk = (n: number, sev: 1 | 2 | 3, ageH: number, o: Partial<Ev> = {}) => Array.from({ length: n }, (_, i) => ev(i, 48.5, 37.5, now - ageH * 36e5, { severity: sev, ...o }));
+  assert.equal(tensionIndex([], now), 0);
+  const quiet = tensionIndex(mk(10, 1, 1), now), busy = tensionIndex(mk(10, 3, 1), now);
+  assert.ok(busy > quiet && busy < 100);
+  assert.equal(tensionIndex(mk(10, 3, 30), now), 0); // older than 24h
+  assert.equal(tensionIndex(mk(10, 3, 1, { conflict: '', power: true }), now), 0);
+  assert.equal(tensionIndex(mk(30, 2, 1), now), tensionIndex(mk(30, 2, 1), now)); // 30*3 = 90 -> 38
+  assert.equal(tensionIndex(mk(30, 2, 1), now), 38);
+});
+
+test('tension series is oldest-first with 17 points and sees an earlier spike', () => {
+  const now = Date.now();
+  const spike = Array.from({ length: 40 }, (_, i) => ev(i, 48.5, 37.5, now - 40 * 36e5, { severity: 3 }));
+  const s = tensionSeries(spike, now);
+  assert.equal(s.length, 17);
+  assert.ok(s[3] > 0 && s[0] === 0 && s[16] === 0); // the spike enters the 24h window at -40h and ages out by now
+  assert.deepEqual([tensionLevel(10), tensionLevel(40), tensionLevel(60), tensionLevel(90)], ['Calm', 'Elevated', 'High', 'Severe']);
+});
+
+test('the most notable aircraft is ranked first', () => {
+  assert.ok(planeRank({ desc: 'Boeing E-3 Sentry', flight: 'SENTRY1' }) > planeRank({ desc: 'Boeing C-17 Globemaster III', flight: 'RCH123' }));
+  assert.ok(planeRank({ desc: 'Boeing C-17 Globemaster III' }) > planeRank({ desc: 'Cessna 172' }));
+  assert.ok(planeRank({ flight: 'ABC1' }) > planeRank({}));
 });

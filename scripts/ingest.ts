@@ -1,7 +1,7 @@
 // Runs every ~10 min from GitHub Actions. Each source is independent: one failing doesn't stop the others.
 import { createHash } from 'node:crypto';
 import { Transient, db, gemini } from './lib';
-import { CONFLICT_RE, POWER_RE, gdeltTs, parseBsky, parseRss, vesselKind } from './util';
+import { CONFLICT_RE, POWER_RE, gdeltTs, isEnglish, parseBsky, parseRss, vesselKind } from './util';
 
 type Item = { title: string; url: string; summary?: string; ts: number; source?: string };
 
@@ -33,6 +33,7 @@ const get = async (u: string) => {
 const PROMPT = `You triage news headlines for a global conflict and energy tracker. For each numbered headline decide whether it reports (a) a specific armed-conflict event (attack, strike, clash, shelling, military movement, ceasefire news) or (b) a blackout, major power outage, or damage to power plants, substations or the electricity grid anywhere in the world (war, storm, sabotage or technical failure).
 Return a JSON array with one object per headline: {"i":number,"relevant":boolean,"lat":number,"lon":number,"country":string,"conflict":string,"type":"airstrike"|"battle"|"explosion"|"shelling"|"naval"|"ceasefire"|"civilians"|"protest"|"other","severity":1|2|3,"power":boolean,"summary":string}.
 lat/lon = best estimate of where it happened (use the named city, else the capital). country = common English name. conflict = short stable name such as "Russia-Ukraine war", "Gaza war", "Sudan civil war"; use "" for a power outage that has nothing to do with an armed conflict. power = true when the report is about electricity supply or infrastructure. summary = neutral, max 25 words. severity: 3 mass casualties, nationwide blackout or major escalation, 2 notable, 1 minor. If not relevant, set relevant false and use 0 / "" for the rest.
+Headlines in any language other than English are never relevant: set relevant false for them.
 Headlines:
 `;
 
@@ -46,7 +47,7 @@ async function news() {
     ...FEEDS.map(async (u) => parseRss(await (await get(u)).text())),
     (async (): Promise<Item[]> => {
       const j: any = await (await get(GDELT)).json();
-      return (j.articles ?? []).map((a: any) => ({ title: a.title, url: a.url, ts: gdeltTs(a.seendate) }));
+      return (j.articles ?? []).filter((a: any) => !a.language || /english/i.test(a.language)).map((a: any) => ({ title: a.title, url: a.url, ts: gdeltTs(a.seendate) }));
     })(),
     ...BSKY.map(async (h): Promise<Item[]> =>
       parseBsky(await (await get(`https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${h}&limit=20&filter=posts_no_replies`)).json()),
@@ -63,7 +64,7 @@ async function news() {
   const seen = new Set<string>((await seenRef.get()).data()?.ids ?? []);
   const fresh = new Map<string, Item>();
   for (const it of items) {
-    if (!CONFLICT_RE.test(it.title) && !POWER_RE.test(it.title)) continue;
+    if (!isEnglish(it.title) || (!CONFLICT_RE.test(it.title) && !POWER_RE.test(it.title))) continue;
     const id = createHash('sha1').update(it.url).digest('hex').slice(0, 20);
     if (!seen.has(id)) fresh.set(id, it);
   }

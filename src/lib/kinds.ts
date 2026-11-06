@@ -32,3 +32,15 @@ export const VESSEL_LABEL: Record<VesselKind, string> = {
 /** Older data only has the `navy` flag. */
 export const vesselKindOf = (v: { kind?: string; navy?: boolean }): VesselKind =>
   (VESSEL_KINDS as readonly string[]).includes(v.kind ?? '') ? (v.kind as VesselKind) : v.navy ? 'navy' : 'other';
+
+/**
+ * How notable an aircraft is, so a bunch of them can be shown as its "main flight": surveillance, bombers and
+ * tankers first, then transports, then anything with a callsign.
+ */
+export const planeRank = (p: { t?: string; desc?: string; flight?: string }) => {
+  const d = `${p.desc ?? ''} ${p.t ?? ''}`;
+  const type = /awacs|e-3|e-7|e-2|rc-135|p-8|p-3|global hawk|mq-4|b-52|b-1b?|b-2|tu-95|tu-160|kc-|tanker|mrtt|il-78/i.test(d)
+    ? 3
+    : /c-17|c-5|c-130|globemaster|galaxy|hercules|an-124|il-76|a400|transport/i.test(d) ? 2 : 0;
+  return type + (p.flight?.trim() ? 1 : 0);
+};

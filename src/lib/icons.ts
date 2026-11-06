@@ -75,7 +75,7 @@ function sprite(draw: Draw, size = S) {
   return image(el);
 }
 
-const PLANE = 'M12 1.5c.9 0 1.6 1 1.6 2.3v5.6l8.4 5.2v2.3l-8.4-2.5v4.6l2.4 1.9v1.8L12 21.6 8 22.7v-1.8l2.4-1.9v-4.6L2 16.9v-2.3l8.4-5.2V3.8c0-1.3.7-2.3 1.6-2.3z';
+export const PLANE = 'M12 1.5c.9 0 1.6 1 1.6 2.3v5.6l8.4 5.2v2.3l-8.4-2.5v4.6l2.4 1.9v1.8L12 21.6 8 22.7v-1.8l2.4-1.9v-4.6L2 16.9v-2.3l8.4-5.2V3.8c0-1.3.7-2.3 1.6-2.3z';
 const HULL = 'M12 1.5c2.7 3 3.7 6.6 3.7 10.5v9a1 1 0 0 1-1 1H9.3a1 1 0 0 1-1-1v-9c0-3.9 1-7.5 3.7-10.5z';
 
 const SHIP_COLOR: Record<VesselKind, string> = {
