@@ -19,7 +19,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const err = (name: string) => (e: Error) => { console.error(`Firestore ${name}:`, e); set({ err: `${name}: ${e.message}` }); };
     const since = Date.now() - 3 * 864e5;
     const offs = [
-      onSnapshot(query(collection(db, 'events'), where('ts', '>', since), orderBy('ts', 'desc'), limit(300)),
+      onSnapshot(query(collection(db, 'events'), where('ts', '>', since), orderBy('ts', 'desc'), limit(800)),
         (s) => set({ events: s.docs.map((x) => ({ id: x.id, ...x.data() }) as Ev) }), err('events')),
       onSnapshot(doc(db, 'vessels', 'latest'), (s) => set({ vessels: s.data()?.items ?? [] }), err('vessels')),
       onSnapshot(doc(db, 'planes', 'latest'), (s) => set({ planes: s.data()?.items ?? [] }), err('planes')),

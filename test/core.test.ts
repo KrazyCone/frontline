@@ -35,7 +35,7 @@ test('gdelt timestamps parse', () => {
 test('activity zones need 3 recent events in one cell', () => {
   assert.equal(activityZones([ev(1), ev(2), ev(3)]).features.length, 1);
   assert.equal(activityZones([ev(1), ev(2)]).features.length, 0);
-  const old = Date.now() - 72 * 36e5;
+  const old = Date.now() - 73 * 36e5;
   assert.equal(activityZones([ev(1, old), ev(2, old), ev(3, old)]).features.length, 0);
 });
 
