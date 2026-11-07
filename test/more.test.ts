@@ -4,7 +4,7 @@ import { mixByCountry, parseCsv, readPlants } from '../scripts/csv';
 import { POWER_RE, isEnglish, parseBsky, vesselKind } from '../scripts/util';
 import { CONFLICTS, conflictFor, conflictStats, levelOf } from '../src/lib/conflicts';
 import { normCountry } from '../src/lib/countries';
-import { eventKind, planeKind, planeRank, vesselKindOf } from '../src/lib/kinds';
+import { eventKind, planeKind, planeRank, shortType, vesselKindOf } from '../src/lib/kinds';
 import { tensionIndex, tensionLevel, tensionSeries } from '../src/lib/tension';
 import { activityZones, adminZones, clusters, hull, smooth } from '../src/lib/zones';
 import type { Ev } from '../src/types';
@@ -175,4 +175,11 @@ test('the most notable aircraft is ranked first', () => {
   assert.ok(planeRank({ desc: 'Boeing E-3 Sentry', flight: 'SENTRY1' }) > planeRank({ desc: 'Boeing C-17 Globemaster III', flight: 'RCH123' }));
   assert.ok(planeRank({ desc: 'Boeing C-17 Globemaster III' }) > planeRank({ desc: 'Cessna 172' }));
   assert.ok(planeRank({ flight: 'ABC1' }) > planeRank({}));
+});
+
+test('aircraft type is shortened for the map label', () => {
+  assert.equal(shortType({ desc: 'Boeing C-17 Globemaster III', t: 'C17' }), 'C-17');
+  assert.equal(shortType({ desc: 'Sikorsky UH-60 Black Hawk', t: 'H60' }), 'UH-60');
+  assert.equal(shortType({ desc: 'BOEING 737-800', t: 'B738' }), 'B738');
+  assert.equal(shortType({}), '');
 });

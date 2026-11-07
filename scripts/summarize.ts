@@ -1,8 +1,14 @@
-// Runs hourly. Writes one summary doc per UTC hour; each user's app reads the doc nearest THEIR local 5 PM.
+// Writes one summary doc per UTC hour; each user's app reads the doc nearest THEIR local 5 PM.
+// Runs from its own hourly schedule and also after every ingest (ONLY_IF_MISSING=1), because GitHub's scheduler often skips runs.
 import { Transient, db, gemini } from './lib';
 import { keywords } from './util';
 
 const now = Date.now();
+const slot = (t: number) => db.doc(`summaries/${new Date(t).toISOString().slice(0, 13)}`);
+if (process.env.ONLY_IF_MISSING && (await slot(now).get()).exists) {
+  console.log('this hour already has a summary');
+  process.exit(0);
+}
 const snap = await db.collection('events').where('ts', '>', now - 864e5).orderBy('ts', 'desc').limit(400).get();
 const events = snap.docs.map((d) => d.data());
 
@@ -20,7 +26,6 @@ Events:
 ${top.map((e) => `- [${e.conflict} | ${e.country} | ${new Date(e.ts).toISOString().slice(0, 16)}] ${e.title}${e.summary ? ': ' + e.summary : ''}`).join('\n')}`);
     if (typeof out?.overall !== 'string' || !Array.isArray(out.conflicts)) throw new Error('Unexpected Gemini summary shape');
     const payload = { ts: now, overall: out.overall, conflicts: out.conflicts };
-    const slot = (t: number) => db.doc(`summaries/${new Date(t).toISOString().slice(0, 13)}`);
     await slot(now).set(payload);
     // A busy Gemini can skip hours, and users whose 5 PM lands in one would see nothing, so lend them this summary.
     // shortcut: a lent summary is up to 6 hours newer than its slot; fine for a daily briefing.
