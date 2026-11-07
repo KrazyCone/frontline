@@ -1,4 +1,4 @@
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, documentId, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { db } from '../firebase';
 import { hourId, next5pm, recent5pms } from '../lib/time';
@@ -13,7 +13,14 @@ export default function SummaryTab() {
 
   useEffect(() => {
     if (id in docs) return;
-    getDoc(doc(db, 'summaries', id)).then((s) => setDocs((d) => ({ ...d, [id]: s.exists() ? (s.data() as Summary) : null })));
+    // GitHub's scheduler can run late or skip an hour, so take the newest summary at or before this slot,
+    // as long as it was written within 12 hours of 5 PM.
+    getDocs(query(collection(db, 'summaries'), where(documentId(), '<=', id), orderBy(documentId(), 'desc'), limit(1)))
+      .then((r) => {
+        const s = r.docs[0]?.data() as Summary | undefined;
+        setDocs((d) => ({ ...d, [id]: s && Math.abs(slots[i].getTime() - s.ts) < 12 * 36e5 ? s : null }));
+      })
+      .catch(() => setDocs((d) => ({ ...d, [id]: null })));
   }, [id, docs]);
 
   const s = docs[id];
@@ -31,6 +38,7 @@ export default function SummaryTab() {
       {s === null && <p className="muted">No summary for this day yet. If 5 PM just passed, check back in a few minutes.</p>}
       {s && (
         <>
+          <p className="muted">Written at {new Date(s.ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</p>
           <h3>Overview</h3>
           {s.overall.split('\n\n').map((p, n) => <p key={n}>{p}</p>)}
           <h3>By conflict</h3>

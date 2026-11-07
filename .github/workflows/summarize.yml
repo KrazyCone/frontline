@@ -1,6 +1,6 @@
 name: summarize
 on:
-  schedule: [{ cron: '3 * * * *' }]
+  schedule: [{ cron: '37 * * * *' }]
   workflow_dispatch:
 concurrency: summarize
 jobs:

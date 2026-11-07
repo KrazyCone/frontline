@@ -7,7 +7,7 @@ import Sheet, { type Sel } from '../components/Sheet';
 import { useData } from '../data';
 import { CONFLICTS, colorFor, conflictFor, conflictStats, levelOf, type Level } from '../lib/conflicts';
 import { PLANE, addIcons } from '../lib/icons';
-import { eventKind, planeKind, planeRank, vesselKindOf } from '../lib/kinds';
+import { eventKind, planeKind, planeRank, shortType, vesselKindOf } from '../lib/kinds';
 import { FUEL, accessColor, loadPower, type Power } from '../lib/power';
 import { usePrefs } from '../lib/prefs';
 import { agoText } from '../lib/time';
@@ -30,14 +30,13 @@ const GROUPS: Record<string, string[]> = {
   'Conflict zones': ['zones-fill', 'zones-glow', 'zones-line'],
   'Conflict labels': [],
   Heatmap: ['heat'],
-  'Military aircraft': ['planes'],
+  'Military aircraft': ['planes', 'plane-labels'],
   Vessels: ['vessels'],
   'Power grid': ['power-fill', 'plants-big', 'plants'],
 };
 const DEFAULT_ON = new Set(['Events', 'Conflict zones', 'Conflict labels', 'Military aircraft', 'Vessels']);
 // Cluster badges are HTML markers (no map fonts needed). Which layer group hides them is listed here.
 const CLUSTERS = [
-  { src: 'events', group: 'Events', cls: 'ev' },
   { src: 'planes', group: 'Military aircraft', cls: 'pl' },
   { src: 'vessels', group: 'Vessels', cls: 'sh' },
 ] as const;
@@ -56,10 +55,10 @@ function setup(m: maplibregl.Map) {
   addIcons(m);
   // Shaded areas go under the basemap's labels; icons go on top of everything.
   const before = m.getStyle().layers.find((l) => l.type === 'symbol')?.id;
-  const cluster = (radius: number, max: number) => ({ type: 'geojson', data: EMPTY, cluster: true, clusterRadius: radius, clusterMaxZoom: max, clusterProperties: { sev: ['max', ['get', 'severity']] } }) as never;
+  const cluster = (radius: number, max: number) => ({ type: 'geojson', data: EMPTY, cluster: true, clusterRadius: radius, clusterMaxZoom: max }) as never;
   m.addSource('countries', { type: 'geojson', data: COUNTRIES });
   for (const id of ['zones', 'plants', 'pulse', 'evraw', 'focus']) m.addSource(id, { type: 'geojson', data: EMPTY as never });
-  m.addSource('events', cluster(44, 6));
+  m.addSource('events', { type: 'geojson', data: EMPTY as never }); // events are never grouped
   m.addSource('planes', cluster(52, 7));
   m.addSource('vessels', cluster(52, 7));
 
@@ -96,6 +95,15 @@ function setup(m: maplibregl.Map) {
     id: 'planes', type: 'symbol', source: 'planes', filter: unclustered as never,
     layout: { 'icon-image': ['get', 'kind'], 'icon-rotate': ['get', 'trk'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-size': size },
   });
+  // Callsign above, aircraft type below. Uses whatever font the basemap already loads, so no extra font files.
+  const font = m.getStyle().layers.map((l) => (l as { layout?: Record<string, unknown> }).layout?.['text-font']).find(Boolean);
+  if (font) {
+    m.addLayer({
+      id: 'plane-labels', type: 'symbol', source: 'planes', minzoom: 3, filter: unclustered as never,
+      layout: { 'text-field': ['concat', ['get', 'label'], '\n', ['get', 'ty']], 'text-font': font as never, 'text-size': 11, 'text-anchor': 'left', 'text-justify': 'left', 'text-offset': [1.3, 0], 'text-ignore-placement': true },
+      paint: { 'text-color': '#e8f9ff', 'text-halo-color': 'rgba(0,0,0,.85)', 'text-halo-width': 1.4 },
+    });
+  }
   m.addLayer({ id: 'focus', type: 'circle', source: 'focus', paint: { 'circle-radius': 20, 'circle-color': 'rgba(255,255,255,0)', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff' } });
   m.addLayer({
     id: 'events', type: 'symbol', source: 'events', filter: unclustered as never,
@@ -105,9 +113,11 @@ function setup(m: maplibregl.Map) {
 
 /** Switch between the 3D globe and the flat map, and keep the user from zooming out past the edge of the world. */
 function setLimits(m: maplibregl.Map, globe: boolean) {
-  const c = m.getContainer();
-  m.setMaxBounds(globe ? null : [[-180, -85], [180, 85]]);
-  m.setMinZoom(globe ? 1 : Math.max(1, Math.log2(Math.max(c.clientWidth, c.clientHeight) / 512)));
+  try {
+    const c = m.getContainer();
+    m.setMaxBounds(globe ? null : [[-180, -85], [180, 85]]);
+    m.setMinZoom(globe ? 1 : Math.max(1, Math.log2(Math.max(c.clientWidth, c.clientHeight) / 512) || 1));
+  } catch (e) { console.warn('map limits:', e); }
 }
 function setView(m: maplibregl.Map, globe: boolean) {
   try { m.setProjection({ type: globe ? 'globe' : 'mercator' }); } catch (e) { console.warn('projection:', e); }
@@ -154,7 +164,7 @@ export default function MapTab({ active }: { active: boolean }) {
     for (const { src, group, cls } of CLUSTERS) {
       if (!m.getSource(src) || !m.isSourceLoaded(src)) continue;
       for (const f of m.querySourceFeatures(src, { filter: ['has', 'point_count'] })) {
-        const p = f.properties as { cluster_id: number; point_count: number; sev?: number };
+        const p = f.properties as { cluster_id: number; point_count: number };
         const key = `${src}:${p.cluster_id}`;
         seen.add(key);
         const at = (f.geometry as unknown as { coordinates: [number, number] }).coordinates;
@@ -163,7 +173,7 @@ export default function MapTab({ active }: { active: boolean }) {
           const el = document.createElement('button');
           const n = p.point_count;
           const d = Math.round(26 + Math.min(22, Math.log2(n) * 5));
-          el.className = `cl ${cls}${cls === 'ev' ? ` sev${p.sev ?? 1}` : ''}`;
+          el.className = `cl ${cls}`;
           el.style.width = el.style.height = `${d}px`;
           el.textContent = n > 999 ? `${Math.round(n / 100) / 10}k` : String(n);
           el.title = `${n} items. Tap to zoom in.`;
@@ -176,7 +186,8 @@ export default function MapTab({ active }: { active: boolean }) {
               const label = String(t.label ?? '').replace(/[<>&"]/g, '');
               el.className = 'cl pl main';
               el.style.width = el.style.height = '';
-              el.innerHTML = `<svg viewBox="0 0 24 24" style="transform:rotate(${Number(t.trk) || 0}deg)"><path d="${PLANE}"/></svg><b>${label}</b><i>+${n - 1}</i>`;
+              const ty = String(t.ty ?? '').replace(/[<>&"]/g, '');
+              el.innerHTML = `<svg viewBox="0 0 24 24" style="transform:rotate(${Number(t.trk) || 0}deg)"><path d="${PLANE}"/></svg><span class="t"><b>${label}</b><u>${ty}</u></span><i>+${n - 1}</i>`;
               el.title = `${label} and ${n - 1} more aircraft here. Tap to zoom in.`;
             }).catch(() => { /* keep the plain count badge */ });
           }
@@ -201,7 +212,7 @@ export default function MapTab({ active }: { active: boolean }) {
     set('events', fc(evFeatures));
     set('evraw', fc(evFeatures)); // unclustered copy for the heatmap
     set('pulse', fc(evs.filter((e) => e.severity === 3 && now - e.ts < 6 * 36e5).map((e) => pt(e.lon, e.lat, {}))));
-    set('planes', fc(L.planes.map((p) => pt(p.lon, p.lat, { id: p.hex, kind: planeKind(p), trk: p.trk ?? 0, rank: planeRank(p), label: p.flight?.trim() || p.t || p.hex }))));
+    set('planes', fc(L.planes.map((p) => pt(p.lon, p.lat, { id: p.hex, kind: planeKind(p), trk: p.trk ?? 0, rank: planeRank(p), label: p.flight?.trim() || p.t || p.hex, ty: shortType(p) }))));
     set('vessels', fc(L.vessels.map((v) => pt(v.lon, v.lat, { id: v.mmsi, kind: vesselKindOf(v), hdg: v.hdg ?? 0 }))));
     const zoneKey = (e: (typeof evs)[number]) => {
       const c = conflictFor(e);
@@ -307,7 +318,7 @@ export default function MapTab({ active }: { active: boolean }) {
     if (m?.getLayer('country-hl')) m.setFilter('country-hl', ['==', ['get', 'NAME'], sel?.kind === 'country' ? sel.title : '']);
   }, [sel]);
   useEffect(() => {
-    if (map.current) setView(map.current, globe);
+    try { if (map.current) setView(map.current, globe); } catch (e) { console.warn('view switch:', e); }
     try { localStorage.setItem('globe', globe ? '1' : '0'); } catch { /* private mode */ }
   }, [globe]);
   // Power data is only fetched when someone asks for it (the layer or a country's Power tab).

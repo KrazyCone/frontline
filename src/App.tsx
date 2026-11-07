@@ -1,5 +1,6 @@
 import { onAuthStateChanged, signInWithPopup, type User } from 'firebase/auth';
 import { useEffect, useState } from 'react';
+import ErrorBoundary from './components/ErrorBoundary';
 import { DataProvider, useData } from './data';
 import { auth, provider } from './firebase';
 import { PrefsProvider } from './lib/prefs';
@@ -56,7 +57,7 @@ function Shell({ user }: { user: User }) {
       <main>
         <section className="tab" hidden={tab !== 'home'}><Home go={(t) => setTab(t as never)} /></section>
         <section className="tab" hidden={tab !== 'summary'}><SummaryTab /></section>
-        <section className="tab map" hidden={tab !== 'map'}><MapTab active={tab === 'map'} /></section>
+        <section className="tab map" hidden={tab !== 'map'}><ErrorBoundary label="map"><MapTab active={tab === 'map'} /></ErrorBoundary></section>
         <section className="tab" hidden={tab !== 'markets'}><Markets /></section>
         <section className="tab" hidden={tab !== 'settings'}><Settings user={user} /></section>
       </main>

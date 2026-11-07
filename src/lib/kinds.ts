@@ -44,3 +44,6 @@ export const planeRank = (p: { t?: string; desc?: string; flight?: string }) => 
     : /c-17|c-5|c-130|globemaster|galaxy|hercules|an-124|il-76|a400|transport/i.test(d) ? 2 : 0;
   return type + (p.flight?.trim() ? 1 : 0);
 };
+
+/** "C-17" from "Boeing C-17 Globemaster III"; falls back to the ICAO code (e.g. "B738"). */
+export const shortType = (p: { t?: string; desc?: string }) => /\b[A-Z]{1,3}-\d{1,3}[A-Z]?\b/.exec(p.desc ?? '')?.[0] ?? p.t ?? '';
